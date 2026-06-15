@@ -1,15 +1,15 @@
 import numpy as np
 import multiprocessing as mp
 from multiprocessing.pool import ThreadPool
+import tifffile
 
 
-def read_log_nikon(path, prefix, white, angles, pixels=2000):
+def read_log_data(path, prefix, white, angles, pixels_x, pixels_y):
     det_offset = int(63 * 2)  # in bytes
-    det_len = int(pixels * pixels)
-
-    g = np.zeros((pixels, angles, pixels), dtype='float32')
+    det_len = int(pixels_x * pixels_y)
+    g = np.zeros((pixels_y, angles, pixels_x), dtype='float32')
     def read_proj(pr):
-        g[:, pr, :] = np.fromfile(path + prefix + str(pr+1).zfill(4) + '.tif', dtype='uint16', offset=det_offset, count=det_len).reshape(pixels, pixels)
+        g[:, pr, :] = np.fromfile(path + prefix + str(pr+1).zfill(4) + '.tif', dtype='uint16', offset=det_offset, count=det_len).reshape(pixels_y, pixels_x)
         g[:, pr, :] = -np.log(np.maximum(0.001, g[:, pr, :] / white))
 
     pool = ThreadPool(mp.cpu_count() - 10)
@@ -17,6 +17,7 @@ def read_log_nikon(path, prefix, white, angles, pixels=2000):
     pool.close()
 
     return g
+
 
 def vectors_astra(pixel, voxel, sod, sdd, rot_step, angles, det_x, det_y, eta, theta, phi):
 
