@@ -80,3 +80,91 @@ def vectors_astra(pixel, voxel, sod, sdd, rot_step, angles, det_x, det_y, eta, t
 
     return vectors
 
+
+def AGD(x0, A, Data, l, alpha, num_iters, eps, sigma):
+    # Initialize the solution with zeros
+    xk = x0
+    xk1 = xk
+    y = xk
+    t = torch.tensor(1)
+
+    # Gradient descent loop
+    for k in range(num_iters):
+
+        t1 = (1 + torch.sqrt(1 + 4 * t**2)) / 2
+        y = xk + ((t-1)/t1) * (xk - xk1)
+        
+        xk1 = xk
+        t = t1
+        xk = y - alpha * grad_post_tv(y, Data, l, eps, sigma)
+
+        print(f"Step: {k}", end="\r")
+
+    return xk
+
+def grad_post_tv(x, Data, l, eps, sigma):
+    return adjoint((forward_model(x, A) - Data), A)/ (sigma**2) + l *(smooth_tv_grad(x, eps))
+
+def smooth_tv_grad(x, eps):
+    Dx1 = gradient(x, 0) 
+    Dx2 = gradient(x, 1)
+    Norm = torch.sqrt(gradient(x, 0) ** 2 + gradient(x, 1) ** 2)
+    P1 = Dx1 / torch.max(Norm, eps)
+    P2 = Dx2 / torch.max(Norm, eps)
+    return (div(P1, axis = 0) + div(P2, axis = 1))
+
+def adjoint(x, A):
+    xx = x.to(device)
+    bp = A.transpose()
+    c = bp(xx)
+    return c
+
+def forward_model(x, A):
+    xx = x.to(device)
+    aa = A(xx)
+    return aa.to(device)
+
+def gradient(x, axis):
+    return torch.roll(x, -1, dims= axis) - x
+
+def div(x, axis):
+    return torch.roll(x, 1, dims= axis) - x
+
+
+def shift_x_2d(g, sod, sdd, pixel, rot_step):
+
+    # x shift of the center of rotation in mm
+    # based on fanbeam symmetry relantionship
+    # g can be fan or conebeam
+
+    if len(g.shape) == 3:
+        g = g[g.shape[0]//2 - 1]*0 + g[g.shape[0]//2]
+
+    angles, columns = g.shape
+    
+    magn_i = sod / sdd
+    s_M = (columns * pixel * magn_i - 1) * 0.5
+    beta = np.arange(angles) * rot_step * np.pi / 180
+    s = np.linspace(-s_M, s_M, columns)# - shift_0 * magn_i
+
+    interpolator = RBS(beta, s, g, kx = 1, ky = 1)
+  
+    upsampling = 1 / 0.01  # for image registration, 1 / pixels
+
+    twopi = 2 * np.pi
+    f2 = np.zeros((angles, columns))
+    sh_0 = 2*np.arctan2(s, sod) + np.pi
+        
+    for bb in np.arange(angles):
+        beta_s = sh_0 + beta[bb]
+        mask = beta_s > twopi
+        beta_s[mask] -= twopi
+        f2[bb,:] = interpolator(beta_s, -s , grid = False)
+    #plt.figure(1); plt.imshow(g)
+    #plt.figure(2); plt.imshow(f2); plt.show(); exit()
+
+    #plt.figure(12); plt.plot(g[0]); plt.plot(f2[0])
+
+    shifts = pcc(g, f2, upsample_factor = upsampling, normalization = None)[0] * pixel * 0.5       
+
+    return shifts[1]  # this is in mm
